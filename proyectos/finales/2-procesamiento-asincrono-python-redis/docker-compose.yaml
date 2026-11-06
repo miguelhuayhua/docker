@@ -1,0 +1,72 @@
+services:
+  # Base de datos en memoria y broker de mensajes (Imagen oficial lista para usar)
+  redis:
+    image: redis:7-alpine
+    container_name: p2_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - queue_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Productor: FastAPI web server que encola peticiones
+  api-producer:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    container_name: p2_fastapi_producer
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - queue_net
+
+  # Consumidor / Background Worker: Procesa la cola en segundo plano
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: p2_python_worker
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - queue_net
+
+  # UI de gestión y visualización de Redis (Redis Commander listo para usar)
+  redis-ui:
+    image: rediscommander/redis-commander:latest
+    container_name: p2_redis_commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8085:8081"
+    depends_on:
+      - redis
+    networks:
+      - queue_net
+
+volumes:
+  redis_data:
+
+networks:
+  queue_net:
+    driver: bridge
